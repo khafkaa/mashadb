@@ -4,10 +4,28 @@ from mysql.connector import Error as SqlError
 from pandas import DataFrame as df
 
 from utilities.system.tty import echo
-from utilities.iter.accessories import flatten, CustomDict
 from utilities.decolab.boundinnerclass import BoundInnerClass
+from utilities.iter.accessories import CustomDict, flatten, multisub
 
-doubledots = re.compile(r'.*?\.\..*')
+logic = re.compile(r'\sor\s', re.IGNORECASE)
+expansion_operators = re.compile(r'(\+|-|%|\.\.)')
+expansions = re.compile(r'(^%.+|.+%$|^.+%.+$|.*?\.\..*|^[+-].+)')
+
+
+def expComp(key, value):
+    return f"{key}{multisub({'+': ' >= ', '-': ' <= '}, value)}"
+
+
+def expRange(key, value):
+    low, high = value.split('..')
+    return f"{key} BETWEEN '{low}' AND '{high}'"
+
+
+def expLike(key, value):
+    return f"{key} LIKE '{value}'"
+
+
+syntax_expansion = {'+': expComp, '-': expComp, '%': expLike, '..': expRange}
 
 class MashaDB:
 
@@ -17,11 +35,10 @@ class MashaDB:
                password=pass
                host=hostname
                database=dbname
-
            USAGE:
-               db = MariaDB(user=username, password=pass, host=hostname, database=dbname)
+               db = MashaDB(user=username, password=pass, host=hostname, database=dbname)
         '''
-        self.credentials = CustomDict(**connect).set(auth_plugin='mysql_native_password')
+        self.credentials = CustomDict(**connect).add(auth_plugin='mysql_native_password')
         self.user = self.credentials['user']
         self.host = self.credentials['host']
         self.database = self.credentials['database']
@@ -147,6 +164,7 @@ class MashaDB:
 
             setattr(MashaDB.Table, '_table', self._name)
             setattr(self.select, '_name', self._name)
+            setattr(self.select, 'kursor', self.kursor)
 
         def __repr__(self):
             rep = df(self.describe()).transpose().head(3)
@@ -249,49 +267,51 @@ class MashaDB:
 
         class select:
 
-            def __new__(cls, columns: str, sort: str=None):
+            def __new__(cls, columns: str, filter: bool=False, sort: str=None, limit: str=None):
                 columns = columns.strip()
                 order = '' if sort is None else f"ORDER BY {sort}"
-                if columns.startswith(('*', 'all')):
-                    columns = ', '.join(columns.replace(',', '').split()[1:])
+                limit = '' if limit is None else f"LIMIT {limit}"
+                if filter is False:
+                    columns = ', '.join(columns.replace(',', '').split())
                     columns = columns if columns else 'ALL'
-                    return f"SELECT {columns} FROM {MashaDB.Table._table} {order}".strip()
+                    cls.kursor.execute(f"SELECT {columns} FROM {MashaDB.Table._table} {order} {limit}".strip())
+                    return cls.kursor.fetchall()
                 return object.__new__(cls)
 
-            def __init__(self, columns: str, **_: str) -> None:
+            def __init__(self, columns: str, **kwargs: str) -> None:
+                self.opts = CustomDict(**kwargs)
+                self.opts.add(sort='')
+                self.opts.add(limit='')
                 self.selection = 'ALL' if columns is None else columns.replace(' ', ', ')
+                self.order = f"ORDER BY {self.opts['sort']}" if self.opts['sort'] else ''
+                self.limit = f"LIMIT {self.opts['limit']}" if self.opts['limit'] else ''
 
             def __repr__(self):
-                return f"You must call select.where(condition) if 'all {self.selection}' was not specified"
+                return f"You must call select.where(condition) if the filter flag is set to True"
 
-            def __expand__(self, key: str, value: str) -> str:  # FIX this bewteen issue
-                statement = []
-                syntax = value.split()
+            def expand(self, key, value):
+                result = expansions.match(value).group(0)
+                return syntax_expansion[expansion_operators.search(result).group(0)](key, value)
 
-                for item in syntax:
-                    if re.match('or', item, re.IGNORECASE):
-                        statement.append(item)
-                    elif re.match(doubledots, item):
-                        low, high = item.split('..')
-                        statement.append(doubledots.sub(f"{key} BETWEEN {low} AND {high}", value))
-                    else:
-                        statement.append(f"{key}={item}")
-                return ' '.join(statement)
+            def where(self, condition: str=None, operator: str='OR', **kwargs: str) -> None:
+                if condition:
+                    self.kursor.execute(f"SELECT {self.selection} FROM {self._name} WHERE {condition}".strip())
+                    return self.kursor.fetchall()
 
-            def where(self, sql: str=None, sort: str=None, **kwargs: str) -> None:
-                if sql:
-                    return sql
-
+                statements = []
                 conditions = []
-                order = '' if sort is None else f"ORDER BY {sort}"
-
                 for key, value in kwargs.items():
-                    if re.search('..', value, re.IGNORECASE):
-                        conditions.append(self.__expand__(key, value))
-                    else:
-                        conditions.append(f"{key}={value}")
+                    values = logic.split(value)
+                    for value in values:
+                        if expansions.match(value):
+                            clause = self.expand(key, value)
+                            statements.append(clause)
+                        else:
+                            clause = f"{key}='{value}'"
+                            statements.append(clause)
+                        conditions.append(' OR '.join(statements))
+                        statements.clear()
 
-                return f"SELECT {self.selection} FROM {self._name} WHERE {' AND '.join(conditions)} {order}".strip()
-
-            class join:
-                pass
+                chain = f' {operator} '.join(conditions)
+                self.kursor.execute(f"SELECT {self.selection} FROM {self._name} WHERE {chain} {self.order} {self.limit}".strip())
+                return self.kursor.fetchall()
