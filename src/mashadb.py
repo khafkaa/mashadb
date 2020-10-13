@@ -50,6 +50,7 @@ class MashaDB:
         return self
 
     def __exit__(self, exc_type, exc_val, traceback):
+        self.commit()
         self.closeall()
 
     def __repr__(self):
@@ -142,7 +143,8 @@ class MashaDB:
     def commit(self):
         try:
             self.konnect.commit()
-            echo.info("Data Commit")
+            if self.output:
+                echo.info("Data Commit")
 
         except SqlError as error:
             echo.alert(error)
