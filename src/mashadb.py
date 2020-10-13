@@ -29,7 +29,7 @@ syntax_expansion = {'+': expComp, '-': expComp, '%': expLike, '..': expRange}
 
 class MashaDB:
 
-    def __init__(self, **connect):
+    def __init__(self, verbose=False, **connect):
         '''ARGUMENTS:
                user=username
                password=pass
@@ -42,7 +42,15 @@ class MashaDB:
         self.user = self.credentials['user']
         self.host = self.credentials['host']
         self.database = self.credentials['database']
+        self.output = verbose
         self.version = None
+
+    def __enter__(self):
+        self.connect()
+        return self
+
+    def __exit__(self, exc_type, exc_val, traceback):
+        self.closeall()
 
     def __repr__(self):
         return f'{self.__status__()}'
@@ -78,7 +86,8 @@ class MashaDB:
             if self.konnect.is_connected():
                 self.tables = self.__tables__()
                 self.__update_tables__()
-                echo.info(f"MariaDB {self.version}\nConnected to Database: {self.database}")
+                if self.output:
+                    echo.info(f"MariaDB {self.version}\nConnected to Database: {self.database}")
 
         except SqlError as error:
             echo.alert(f"Connection Error: {error}")
@@ -141,7 +150,7 @@ class MashaDB:
     def rollback(self):
         try:
             self.konnect.rollback()
-            echo.info("Rollback Sucessful")
+            echo.info("Rollback Successful")
 
         except SqlError as error:
             echo.alert(error)
@@ -150,7 +159,8 @@ class MashaDB:
         if self.konnect.is_connected():
             self.kursor.close()
             self.konnect.close()
-            echo.info("MariaDB Server Has Disconnected. Session Ended.")
+            if self.output:
+                echo.info("MariaDB Server Has Disconnected. Session Ended.")
 
     @BoundInnerClass
     class Table:
