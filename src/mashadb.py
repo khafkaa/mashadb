@@ -1,35 +1,18 @@
-import re
 import mysql.connector as engine
 from mysql.connector import Error as SqlError
 from pandas import DataFrame as df
 
 from utilities.system.tty import echo
 from utilities.decolab.boundinnerclass import BoundInnerClass
-from utilities.iter.accessories import CustomDict, flatten, multisub
+from utilities.iter.accessories import CustomDict, flatten
 
-logic = re.compile(r'\sor\s', re.IGNORECASE)
-expansion_operators = re.compile(r'(\+|-|%|\.\.)')
-expansions = re.compile(r'(^%.+|.+%$|^.+%.+$|.*?\.\..*|^[+-].+)')
-
-
-def expComp(key, value):
-    return f"{key}{multisub({'+': ' >= ', '-': ' <= '}, value)}"
-
-
-def expRange(key, value):
-    low, high = value.split('..')
-    return f"{key} BETWEEN '{low}' AND '{high}'"
-
-
-def expLike(key, value):
-    return f"{key} LIKE '{value}'"
-
-
-syntax_expansion = {'+': expComp, '-': expComp, '%': expLike, '..': expRange}
+from utilities.databases.sql.expandops import expander
+from utilities.databases.sql.expandops import logic, expansions
+from utilities.databases.sql.expandops import expansion_operators
 
 class MashaDB:
 
-    def __init__(self, verbose=False, **connect):
+    def __init__(self, **kwargs):
         '''ARGUMENTS:
                user=username
                password=pass
@@ -38,14 +21,15 @@ class MashaDB:
            USAGE:
                db = MashaDB(user=username, password=pass, host=hostname, database=dbname)
         '''
-        self.credentials = CustomDict(**connect).add(auth_plugin='mysql_native_password')
+        self.credentials = CustomDict(**kwargs).add(auth_plugin='mysql_native_password')
         self.user = self.credentials['user']
         self.host = self.credentials['host']
         self.database = self.credentials['database']
-        self.output = verbose
+        self.verbose = True
         self.version = None
 
     def __enter__(self):
+        self.verbose = False
         self.connect()
         return self
 
@@ -87,7 +71,7 @@ class MashaDB:
             if self.konnect.is_connected():
                 self.tables = self.__tables__()
                 self.__update_tables__()
-                if self.output:
+                if self.verbose:
                     echo.info(f"MariaDB {self.version}\nConnected to Database: {self.database}")
 
         except SqlError as error:
@@ -143,7 +127,7 @@ class MashaDB:
     def commit(self):
         try:
             self.konnect.commit()
-            if self.output:
+            if self.verbose:
                 echo.info("Data Commit")
 
         except SqlError as error:
@@ -161,7 +145,7 @@ class MashaDB:
         if self.konnect.is_connected():
             self.kursor.close()
             self.konnect.close()
-            if self.output:
+            if self.verbose:
                 echo.info("MariaDB Server Has Disconnected. Session Ended.")
 
     @BoundInnerClass
@@ -170,6 +154,7 @@ class MashaDB:
         def __init__(self, outer, tablename):
             self._name = tablename
             self.kursor = outer.kursor
+            self.verbose = outer.verbose
             self.rows = self.__rows__()
             self.columns = self.__columns__()
             self.primarykey = self.__get_primary__()
@@ -212,8 +197,9 @@ class MashaDB:
             values = ('%s, ' * len(data)).strip(', ')
             try:
                 self.kursor.execute(f'INSERT IGNORE INTO {self._name} ({columns}) VALUES ({values})', data)
-                echo.info(f"{self.kursor.rowcount} record inserted into {self._name}")
                 self.rows = self.__rows__()
+                if self.verbose:
+                    echo.info(f"{self.kursor.rowcount} record inserted into {self._name}")
 
             except SqlError as error:
                 echo.alert(error)
@@ -303,7 +289,7 @@ class MashaDB:
 
             def expand(self, key, value):
                 result = expansions.match(value).group(0)
-                return syntax_expansion[expansion_operators.search(result).group(0)](key, value)
+                return expander[expansion_operators.search(result).group(0)](key, value)
 
             def where(self, condition: str=None, operator: str='OR', **kwargs: str) -> None:
                 if condition:
