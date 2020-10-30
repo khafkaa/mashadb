@@ -78,6 +78,10 @@ class MashaDB:
             echo.alert(f"Connection Error: {error}")
 
     def create(self, table, **kwargs):
+        """Create a new table:
+            Syntax:
+                    db.create('tablename', id=primary(), FirstName=varchar(255), LastName=char(10))
+        """
         statement = []
         for key, value in kwargs.items():
             if value.endswith('PRIMARY KEY'):
