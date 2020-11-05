@@ -218,6 +218,14 @@ class MashaDB:
             except SqlError as error:
                 echo.alert(error)
 
+        def delete(self, row):
+            try:
+                self.kursor.execute(f"DELETE FROM {self._name} WHERE id={row}")
+                echo.info(f"Deleted row {row} from {self._name}")
+
+            except SqlError as error:
+                echo.alert(error)
+
         def add(self, column, datatype, location='last'):
             self.kursor.execute(f"ALTER TABLE {self._name} ADD COLUMN {column} {datatype} {location}")
             echo.info(f"Added Column {column} To {self._name}")
