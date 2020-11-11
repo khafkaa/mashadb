@@ -163,13 +163,14 @@ class MashaDB:
             self.columns = self.__columns__()
             self.primarykey = self.__get_primary__()
 
-            setattr(MashaDB.Table, '_table', self._name)
-            setattr(self.select, '_name', self._name)
-            setattr(self.select, 'kursor', self.kursor)
+            setattr(self.Selector, 'kursor', self.kursor)
 
         def __repr__(self):
             rep = df(self.describe()).transpose().head(3)
             return f"{rep.rename(index={0: 'COLUMNS:', 1: 'TYPES:', 2: 'NULL'}).to_string(header=False)}"
+
+        def __str__(self):
+            return self._name
 
         def __rows__(self):
             self.kursor.execute(f"SELECT COUNT(*) FROM {self._name};")
@@ -218,9 +219,9 @@ class MashaDB:
             except SqlError as error:
                 echo.alert(error)
 
-        def delete(self, row):
+        def delete(self, id, row):
             try:
-                self.kursor.execute(f"DELETE FROM {self._name} WHERE id={row}")
+                self.kursor.execute(f"DELETE FROM {self._name} WHERE {id}={row}")
                 echo.info(f"Deleted row {row} from {self._name}")
 
             except SqlError as error:
@@ -275,23 +276,27 @@ class MashaDB:
                 return f"SELECT COUNT(DISTINCT {self.selection}) FROM {self._name}"
             return f"SELECT DISTINCT {self.selection}) FROM {self._name}"
 
-        class select:
+        def select(self, columns: str, **kwargs):
+            return self.Selector(self._name, columns, **kwargs)
 
-            def __new__(cls, columns: str, filter: bool=False, sort: str=None, limit: str=None):
+        class Selector:
+
+            def __new__(cls, name: str, columns: str, filter: bool=False, sort: str=None, limit: str=None):
                 columns = columns.strip()
                 order = '' if sort is None else f"ORDER BY {sort}"
                 limit = '' if limit is None else f"LIMIT {limit}"
                 if filter is False:
                     columns = ', '.join(columns.replace(',', '').split())
                     columns = columns if columns else 'ALL'
-                    cls.kursor.execute(f"SELECT {columns} FROM {MashaDB.Table._table} {order} {limit}".strip())
+                    cls.kursor.execute(f"SELECT {columns} FROM {name} {order} {limit}".strip())
                     return cls.kursor.fetchall()
                 return object.__new__(cls)
 
-            def __init__(self, columns: str, **kwargs: str) -> None:
+            def __init__(self, name, columns: str, **kwargs: str) -> None:
                 self.opts = CustomDict(**kwargs)
                 self.opts.add(sort='')
                 self.opts.add(limit='')
+                self._name = name
                 self.selection = 'ALL' if columns is None else columns.replace(' ', ', ')
                 self.order = f"ORDER BY {self.opts['sort']}" if self.opts['sort'] else ''
                 self.limit = f"LIMIT {self.opts['limit']}" if self.opts['limit'] else ''
