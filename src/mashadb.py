@@ -187,146 +187,146 @@ class MashaDB:
             except TypeError:
                 return 0
 
-        def describe(self):
-            try:
-                self.kursor.execute(f"DESC {self._name};")
+    def describe(self):
+        try:
+            self.kursor.execute(f"DESC {self._name};")
 
-            except SqlError as error:
-                echo.alert(error)
+        except SqlError as error:
+            echo.alert(error)
+        else:
+            return self.kursor.fetchall()
+
+    def write(self, **kwargs):
+        data = tuple(kwargs.values())
+        columns = ', '.join(kwargs.keys())
+        values = ('%s, ' * len(data)).strip(', ')
+        try:
+            self.kursor.execute(f'INSERT IGNORE INTO {self._name} ({columns}) VALUES ({values})', data)
+            self.rows = self.__rows__()
+            if self.verbose:
+                echo.info(f"{self.kursor.rowcount} record inserted into {self._name}")
+
+        except SqlError as error:
+            echo.alert(error)
+
+    def update(self, id, **kwargs):
+        data = tuple(kwargs.values())
+        columns = f"{'=%s, '.join(kwargs.keys())}=%s"
+        try:
+            self.kursor.execute(f"UPDATE {self._name} SET {columns} WHERE {self.primarykey}={id}", data)
+            echo.info(f"Updated Row: {id} Column(s): {columns.replace('=%s', '')}")
+
+        except SqlError as error:
+            echo.alert(error)
+
+    def delete(self, id, row):
+        try:
+            self.kursor.execute(f"DELETE FROM {self._name} WHERE {id}={row}")
+            echo.info(f"Deleted row {row} from {self._name}")
+
+        except SqlError as error:
+            echo.alert(error)
+
+    def add(self, column, datatype, location='last'):
+        self.kursor.execute(f"ALTER TABLE {self._name} ADD COLUMN {column} {datatype} {location}")
+        echo.info(f"Added Column {column} To {self._name}")
+
+    def drop(self, column):
+        try:
+            self.kursor.execute(f'ALTER TABLE {self._name} DROP COLUMN {column}')
+            echo.info(f"Dropped column {column} from {self._name}")
+            self.renumber()
+
+        except SqlError as error:
+            echo.alert(error)
+
+    def rename(self, column, new_name):
+        try:
+            self.kursor.execute(f'ALTER TABLE {self._name} RENAME COLUMN {column} TO {new_name}')
+            echo.info(f"Column {column} has been renamed {new_name}")
+
+        except SqlError as error:
+            echo.alert(error)
+
+    def renumber(self):
+        try:
+            if self.primarykey:
+                self.kursor.execute(f'ALTER TABLE {self._name} DROP COLUMN {self.primarykey}')
+                self.kursor.execute(f'ALTER TABLE {self._name} ADD COLUMN {self.primarykey} INT NOT NULL AUTO_INCREMENT PRIMARY KEY FIRST')
+                echo.info(f"{self._name} {self.primarykey} index reset")
             else:
+                self.primarykey = 'id'
+                self.kursor.execute(f'ALTER TABLE {self._name} ADD COLUMN id INT NOT NULL AUTO_INCREMENT PRIMARY KEY FIRST')
+                echo.info(f"{self._name} {self.primarykey} index created")
+
+        except SqlError as error:
+            echo.alert(error)
+
+    def record_exists(self, column, data):
+        try:
+            self.kursor.execute(f"SELECT EXISTS(SELECT 1 FROM {self._name} WHERE {column}='{data}' LIMIT 1)")
+            return self.kursor.fetchone()[0]
+
+        except SqlError as error:
+            echo.alert(error)
+
+    def distinct(self, *columns, count=False):
+        selection = ', '.join(columns)
+        if count:
+            return f"SELECT COUNT(DISTINCT {self.selection}) FROM {self._name}"
+        return f"SELECT DISTINCT {self.selection}) FROM {self._name}"
+
+    def select(self, columns: str, **kwargs):
+        return self.Selector(self._name, columns, **kwargs)
+
+    class Selector:
+
+        def __new__(cls, name: str, columns: str, filter: bool=False, sort: str=None, limit: str=None):
+            columns = columns.strip()
+            order = '' if sort is None else f"ORDER BY {sort}"
+            limit = '' if limit is None else f"LIMIT {limit}"
+            if filter is False:
+                columns = ', '.join(columns.replace(',', '').split())
+                columns = columns if columns else 'ALL'
+                cls.kursor.execute(f"SELECT {columns} FROM {name} {order} {limit}".strip())
+                return cls.kursor.fetchall()
+            return object.__new__(cls)
+
+        def __init__(self, name, columns: str, **kwargs: str) -> None:
+            self.opts = CustomDict(**kwargs)
+            self.opts.add(sort='')
+            self.opts.add(limit='')
+            self._name = name
+            self.selection = 'ALL' if columns is None else columns.replace(' ', ', ')
+            self.order = f"ORDER BY {self.opts['sort']}" if self.opts['sort'] else ''
+            self.limit = f"LIMIT {self.opts['limit']}" if self.opts['limit'] else ''
+
+        def __repr__(self):
+            return f"You must call select.where(condition) if the filter flag is set to True"
+
+        def expand(self, key, value):
+            result = expansions.match(value).group(0)
+            return expander[expansion_operators.search(result).group(0)](key, value)
+
+        def where(self, condition: str=None, operator: str='OR', **kwargs: str) -> None:
+            if condition:
+                self.kursor.execute(f"SELECT {self.selection} FROM {self._name} WHERE {condition}".strip())
                 return self.kursor.fetchall()
 
-        def write(self, **kwargs):
-            data = tuple(kwargs.values())
-            columns = ', '.join(kwargs.keys())
-            values = ('%s, ' * len(data)).strip(', ')
-            try:
-                self.kursor.execute(f'INSERT IGNORE INTO {self._name} ({columns}) VALUES ({values})', data)
-                self.rows = self.__rows__()
-                if self.verbose:
-                    echo.info(f"{self.kursor.rowcount} record inserted into {self._name}")
+            statements = []
+            conditions = []
+            for key, value in kwargs.items():
+                values = logic.split(value)
+                for value in values:
+                    if expansions.match(value):
+                        clause = self.expand(key, value)
+                        statements.append(clause)
+                    else:
+                        clause = f"{key}='{value}'"
+                        statements.append(clause)
+                    conditions.append(' OR '.join(statements))
+                    statements.clear()
 
-            except SqlError as error:
-                echo.alert(error)
-
-        def update(self, id, **kwargs):
-            data = tuple(kwargs.values())
-            columns = f"{'=%s, '.join(kwargs.keys())}=%s"
-            try:
-                self.kursor.execute(f"UPDATE {self._name} SET {columns} WHERE {self.primarykey}={id}", data)
-                echo.info(f"Updated Row: {id} Column(s): {columns.replace('=%s', '')}")
-
-            except SqlError as error:
-                echo.alert(error)
-
-        def delete(self, id, row):
-            try:
-                self.kursor.execute(f"DELETE FROM {self._name} WHERE {id}={row}")
-                echo.info(f"Deleted row {row} from {self._name}")
-
-            except SqlError as error:
-                echo.alert(error)
-
-        def add(self, column, datatype, location='last'):
-            self.kursor.execute(f"ALTER TABLE {self._name} ADD COLUMN {column} {datatype} {location}")
-            echo.info(f"Added Column {column} To {self._name}")
-
-        def drop(self, column):
-            try:
-                self.kursor.execute(f'ALTER TABLE {self._name} DROP COLUMN {column}')
-                echo.info(f"Dropped column {column} from {self._name}")
-                self.renumber()
-
-            except SqlError as error:
-                echo.alert(error)
-
-        def rename(self, column, new_name):
-            try:
-                self.kursor.execute(f'ALTER TABLE {self._name} RENAME COLUMN {column} TO {new_name}')
-                echo.info(f"Column {column} has been renamed {new_name}")
-
-            except SqlError as error:
-                echo.alert(error)
-
-        def renumber(self):
-            try:
-                if self.primarykey:
-                    self.kursor.execute(f'ALTER TABLE {self._name} DROP COLUMN {self.primarykey}')
-                    self.kursor.execute(f'ALTER TABLE {self._name} ADD COLUMN {self.primarykey} INT NOT NULL AUTO_INCREMENT PRIMARY KEY FIRST')
-                    echo.info(f"{self._name} {self.primarykey} index reset")
-                else:
-                    self.primarykey = 'id'
-                    self.kursor.execute(f'ALTER TABLE {self._name} ADD COLUMN id INT NOT NULL AUTO_INCREMENT PRIMARY KEY FIRST')
-                    echo.info(f"{self._name} {self.primarykey} index created")
-
-            except SqlError as error:
-                echo.alert(error)
-
-        def record_exists(self, column, data):
-            try:
-                self.kursor.execute(f"SELECT EXISTS(SELECT 1 FROM {self._name} WHERE {column}='{data}' LIMIT 1)")
-                return self.kursor.fetchone()[0]
-
-            except SqlError as error:
-                echo.alert(error)
-
-        def distinct(self, *columns, count=False):
-            selection = ', '.join(columns)
-            if count:
-                return f"SELECT COUNT(DISTINCT {self.selection}) FROM {self._name}"
-            return f"SELECT DISTINCT {self.selection}) FROM {self._name}"
-
-        def select(self, columns: str, **kwargs):
-            return self.Selector(self._name, columns, **kwargs)
-
-        class Selector:
-
-            def __new__(cls, name: str, columns: str, filter: bool=False, sort: str=None, limit: str=None):
-                columns = columns.strip()
-                order = '' if sort is None else f"ORDER BY {sort}"
-                limit = '' if limit is None else f"LIMIT {limit}"
-                if filter is False:
-                    columns = ', '.join(columns.replace(',', '').split())
-                    columns = columns if columns else 'ALL'
-                    cls.kursor.execute(f"SELECT {columns} FROM {name} {order} {limit}".strip())
-                    return cls.kursor.fetchall()
-                return object.__new__(cls)
-
-            def __init__(self, name, columns: str, **kwargs: str) -> None:
-                self.opts = CustomDict(**kwargs)
-                self.opts.add(sort='')
-                self.opts.add(limit='')
-                self._name = name
-                self.selection = 'ALL' if columns is None else columns.replace(' ', ', ')
-                self.order = f"ORDER BY {self.opts['sort']}" if self.opts['sort'] else ''
-                self.limit = f"LIMIT {self.opts['limit']}" if self.opts['limit'] else ''
-
-            def __repr__(self):
-                return f"You must call select.where(condition) if the filter flag is set to True"
-
-            def expand(self, key, value):
-                result = expansions.match(value).group(0)
-                return expander[expansion_operators.search(result).group(0)](key, value)
-
-            def where(self, condition: str=None, operator: str='OR', **kwargs: str) -> None:
-                if condition:
-                    self.kursor.execute(f"SELECT {self.selection} FROM {self._name} WHERE {condition}".strip())
-                    return self.kursor.fetchall()
-
-                statements = []
-                conditions = []
-                for key, value in kwargs.items():
-                    values = logic.split(value)
-                    for value in values:
-                        if expansions.match(value):
-                            clause = self.expand(key, value)
-                            statements.append(clause)
-                        else:
-                            clause = f"{key}='{value}'"
-                            statements.append(clause)
-                        conditions.append(' OR '.join(statements))
-                        statements.clear()
-
-                chain = f' {operator} '.join(conditions)
-                self.kursor.execute(f"SELECT {self.selection} FROM {self._name} WHERE {chain} {self.order} {self.limit}".strip())
-                return self.kursor.fetchall()
+            chain = f' {operator} '.join(conditions)
+            self.kursor.execute(f"SELECT {self.selection} FROM {self._name} WHERE {chain} {self.order} {self.limit}".strip())
+            return self.kursor.fetchall()
