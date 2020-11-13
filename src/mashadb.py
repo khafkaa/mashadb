@@ -211,7 +211,7 @@ class MashaDB:
 
         def update(self, id, **kwargs):
             data = tuple(kwargs.values())
-            columns = f"{'=%s '.join(kwargs.keys())}=%s"
+            columns = f"{'=%s, '.join(kwargs.keys())}=%s"
             try:
                 self.kursor.execute(f"UPDATE {self._name} SET {columns} WHERE {self.primarykey}={id}", data)
                 echo.info(f"Updated Row: {id} Column(s): {columns.replace('=%s', '')}")
