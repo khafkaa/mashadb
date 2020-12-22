@@ -2,13 +2,13 @@ import mysql.connector as engine
 from mysql.connector import Error as SqlError
 from pandas import DataFrame as df
 
-from utilities.system.tty import echo
-from utilities.decolab.boundinnerclass import BoundInnerClass
-from utilities.iter.accessories import CustomDict, flatten
+from system.tty import echo
+from decolab.boundinnerclass import BoundInnerClass
+from iter.accessories import CustomDict, flatten
 
-from utilities.databases.sql.expandops import expander
-from utilities.databases.sql.expandops import logic, expansions
-from utilities.databases.sql.expandops import expansion_operators
+from databases.sql.expandops import expander
+from databases.sql.expandops import logic, expansions
+from databases.sql.expandops import expansion_operators
 
 class MashaDB:
 

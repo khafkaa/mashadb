@@ -1,7 +1,7 @@
 """MashaDB syntax expansion utilities
 """
 import re
-from utilities.iter.accessories import multisub
+from iter.accessories import multisub
 
 logic = re.compile(r'\sor\s', re.IGNORECASE)
 expansion_operators = re.compile(r'(\+|-|%|\.\.)')
