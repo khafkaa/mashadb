@@ -1,5 +1,4 @@
-"""
-SQL Data Type Function Factory:
+"""SQL Data Type Function Factory:
 """
 DATATYPES = (
     'CHAR(size)', 'VARCHAR(size)', 'TINYTEXT(size)', 'TEXT(size)',

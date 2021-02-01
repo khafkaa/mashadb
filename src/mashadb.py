@@ -1,30 +1,88 @@
+from itertools import chain
 import mysql.connector as engine
 from mysql.connector import Error as SqlError
 from pandas import DataFrame as df
 
-from system.tty import echo
-from decolab.boundinnerclass import BoundInnerClass
-from iter.accessories import CustomDict, flatten
+from src.utilities import echo
+from src.utilities import expander
+from src.utilities import logic, expansions
+from src.utilities import expansion_operators
+from src.boundinnerclass import BoundInnerClass
 
-from databases.sql.expandops import expander
-from databases.sql.expandops import logic, expansions
-from databases.sql.expandops import expansion_operators
 
 class MashaDB:
+    """python interface for MySQL and MariaDB
+
+       USAGE:
+            connect and commit:
+                db = MashaDB(**config)
+                db.connect()
+                db.commit()
+                db.closeall()
+
+            write operations:
+                db.table.write(column=data, column=data, column=data)
+                db.table.write(**data)
+
+            read operations:
+                data = db.table.select(all)
+                data = db.table.select(column, column, column)
+                data = db.table.select(column, filter=True).where(condition)
+
+            with context manager:
+                automatically commits data and closes the connection.
+
+                from functools import partial
+                masha = partial(MashaDB, **config)
+
+                with masha(database=database) as db:
+                    db.table.write(**data)
+                    query = db.table.select(column)
+
+            create a table:
+                db.create(table: str, **kwargs: str)
+                db.create(table: str,
+                          id: str='INT AUTO_INCREMENT PRIMARY KEY'
+                          username: str='VARCHAR(40)',
+                          password: str='VARCHAR(255)')
+    """
 
     def __init__(self, **kwargs):
-        '''ARGUMENTS:
-               user=username
-               password=pass
-               host=hostname
-               database=dbname
+        """ARGUMENTS:
+                required:
+                    user=username
+                    password=password
+                    host=hostname
+                    database=database_name
+
+                optional:
+                    any other keyword arguments that must be passed to 
+                    mysql.connector to ensure its system compatibilty and 
+                    function. 
+
+                    see mysql-connector docs for all possible arguments 
+                    and information:
+
+                    https://dev.mysql.com/doc/connector-python/en/connector-python-connectargs.html
+                    https://dev.mysql.com/doc/connector-python/en/connector-python-reference.html
+
            USAGE:
-               db = MashaDB(user=username, password=pass, host=hostname, database=dbname)
-        '''
-        self.credentials = CustomDict(**kwargs).add(auth_plugin='mysql_native_password')
-        self.user = self.credentials['user']
-        self.host = self.credentials['host']
-        self.database = self.credentials['database']
+                pass a dict with parameters:
+                   config = {
+                        user: username, 
+                        password: password, 
+                        hostname: host,
+                        port: 3306,
+                        database: database_name,
+                        auth_plugin: 'mysql_native_password' 
+                        }
+
+                   db = MashaDB(**config)
+
+                pass keyword arguments:
+                    db = MashaDB(user=user, password=password, host=host, database=database)
+        """
+        self.config = kwargs
         self.verbose = True
         self.version = None
 
@@ -41,46 +99,70 @@ class MashaDB:
         return f'{self.__status__()}'
 
     def __status__(self):
-        connected = f'Masha Version {self.version}: Connected to Database: {self.database}'
-        disconnected = f'Masha Version {self.version} Status Disconnected.'
+        """displays database and connection status"""
+        name = type(self).__name__
+        connected = f"{name} Version {self.version}: Connected to Database: {self.config['database']}"
+        disconnected = f'{name} Version {self.version} Status Disconnected.'
         if self.version:
             return connected if self.konnect.is_connected() else disconnected
-        else:
-            return f'MashaDb: Use MashaDB.connect() to connect to {self.host}.'
-
-    def __tables__(self):
-        self.kursor.execute("SHOW TABLES")
-        result = self.kursor.fetchall()
-        return list(flatten(result))
-
-    def __table_exists__(self, table):
-        self.kursor.execute(f"show tables like '{table}'")
-        return self.kursor.fetchone()[0]
+        return f"Use {name}.connect() to connect to {self.config['host']}."
 
     def __update_tables__(self):
+        """database tables are added as object attributes"""
         for table in self.tables:
             if not hasattr(self.Table, table):
                 setattr(self, table, self.Table(table))
 
-    def connect(self):
+    @property
+    def tables(self):
+        """returns a list of tables contained in the database"""
         try:
-            self.konnect = engine.connect(**self.credentials)
+            self.kursor.execute("SHOW TABLES")
+            result = self.kursor.fetchall()
+            return tuple(chain(*result))
+
+        except (AttributeError, SqlError):
+            echo.alert(f'{type(self).__name__} is not connected to a database')
+
+    def connect(self):
+        """establish a connection with the target MySQL database"""
+        try:
+            self.konnect = engine.connect(**self.config)
             self.kursor = self.konnect.cursor(buffered=True)
             self.version = self.konnect.get_server_info()
 
             if self.konnect.is_connected():
-                self.tables = self.__tables__()
                 self.__update_tables__()
                 if self.verbose:
-                    echo.info(f"MariaDB {self.version}\nConnected to Database: {self.database}")
+                    echo.info(f"MariaDB {self.version}\nConnected to Database: {self.config['database']}")
 
         except SqlError as error:
             echo.alert(f"Connection Error: {error}")
 
-    def create(self, table, **kwargs):
-        """Create a new table:
-            Syntax:
-                    db.create('tablename', id=primary(), FirstName=varchar(255), LastName=char(10))
+    def table_exists(self, table):
+        """checks for the existence of a table in the database"""
+        self.kursor.execute(f"show tables like '{table}'")
+        try:
+            _ = self.kursor.fetchone()[0]
+            return True
+
+        except TypeError:
+            return False
+
+    def create(self, table: str, **kwargs: str) -> None:
+        """create a new table in the database.
+
+           ARGUMENTS:
+                uses positional and keyword arguments: 
+
+                table: str: the new table name
+                keyword:    the column name
+                value: str: the column dataype; sql statement
+
+            USAGE:
+                db.create('table', **kwargs)
+                db.create('table', column='datatype', column='datatype')
+                db.create('users', id='INT AUTO_INCREMENT PRIMARY KEY')
         """
         statement = []
         for key, value in kwargs.items():
@@ -96,9 +178,16 @@ class MashaDB:
             echo.alert(f"{error}")
         else:
             setattr(self, table, self.Table(table))
-            self.tables = self.__tables__()
 
     def drop(self, table):
+        """remove specified table from the database.
+
+           ARGUMENTS:
+                table: str: name of the table to be deleted
+
+           USAGE:
+                db.drop('users')
+        """
         try:
             delattr(self, table)
             self.kursor.execute(f"DROP TABLE IF EXISTS {table}")
@@ -109,10 +198,18 @@ class MashaDB:
         except SqlError as error:
             echo.alert(error)
         else:
-            self.tables = self.__tables__()
             echo.info(f"Table {table} has been deleted.")
 
     def rename(self, table, new_name):
+        """rename a table in the database.
+
+           ARGUMENTS:
+                table:    str: name of the target table
+                new_name: str: new name for the target table
+
+           USAGE:
+                db.rename('users', 'superusers')
+        """
         try:
             delattr(self, table)
             self.kursor.execute(f'ALTER TABLE {table} RENAME TO {new_name}')
@@ -125,10 +222,10 @@ class MashaDB:
 
         else:
             setattr(self, new_name, self.Table(new_name))
-            self.tables = self.__tables__()
             echo.info(f"Table {table} has been renamed {new_name}")
 
     def commit(self):
+        """commit the last transaction(s) and make changes permanent"""
         try:
             self.konnect.commit()
             if self.verbose:
@@ -138,6 +235,7 @@ class MashaDB:
             echo.alert(error)
 
     def rollback(self):
+        """roll back the current transaction and cancel its changes"""
         try:
             self.konnect.rollback()
             echo.info("Rollback Successful")
@@ -146,6 +244,7 @@ class MashaDB:
             echo.alert(error)
 
     def closeall(self):
+        """close the connection to the database"""
         if self.konnect.is_connected():
             self.kursor.close()
             self.konnect.close()
@@ -154,15 +253,39 @@ class MashaDB:
 
     @BoundInnerClass
     class Table:
+        """dynamic bound inner class of the MashaDB database object. 
+
+           each table in the target database is modeled as an attribute 
+           of the database object and is instantiated when operations require 
+           access to the associated database table.
+
+           since a table is a child attribute of the database object, it
+           is called usings standard dot notation.
+
+           EXAMPLE:
+                create a new database object:
+                    db = MashaDB(**config)
+
+                connect to the target database:
+                    db.connect()
+
+                list tables in the database:
+                    db.tables
+
+                to perform operations on a table named 'users':
+
+                    db.users                  describes table users
+                    db.users.rows             list row count
+                    db.users.columns          list column names
+                    db.users.write(**kwargs)  write data to the table
+                    db.usrs.select(column)    lookup data in the table
+        """
 
         def __init__(self, outer, tablename):
             self._name = tablename
+            self._base = outer.config['database']
             self.kursor = outer.kursor
             self.verbose = outer.verbose
-            self.rows = self.__rows__()
-            self.columns = self.__columns__()
-            self.primarykey = self.__get_primary__()
-
             setattr(self.Selector, 'kursor', self.kursor)
 
         def __repr__(self):
@@ -172,14 +295,17 @@ class MashaDB:
         def __str__(self):
             return self._name
 
-        def __rows__(self):
+        @property
+        def rows(self):
             self.kursor.execute(f"SELECT COUNT(*) FROM {self._name};")
             return self.kursor.fetchone()[0]
 
-        def __columns__(self):
+        @property
+        def columns(self):
             return [column[0] for column in self.describe()]
 
-        def __get_primary__(self):
+        @property
+        def primary(self):
             self.kursor.execute(f"SELECT COLUMN_NAME from information_schema.KEY_COLUMN_USAGE where TABLE_NAME='{self._name}' and constraint_name = 'PRIMARY'")
             try:
                 return self.kursor.fetchone()[0]
@@ -187,146 +313,338 @@ class MashaDB:
             except TypeError:
                 return 0
 
-    def describe(self):
-        try:
-            self.kursor.execute(f"DESC {self._name};")
+        def describe(self):
+            """returns information about data stored within the table.
 
-        except SqlError as error:
-            echo.alert(error)
-        else:
-            return self.kursor.fetchall()
+               this method is called by __repr__, which formats the
+               output using a pandas dataframe. This provides an elegant  
+               display while using the repl, but there is considerable  
+               overhead when loading the pandas module. It has no use in  
+               production so my advice is to disable it.
+            """
+            try:
+                self.kursor.execute(f"DESC {self._name};")
 
-    def write(self, **kwargs):
-        data = tuple(kwargs.values())
-        columns = ', '.join(kwargs.keys())
-        values = ('%s, ' * len(data)).strip(', ')
-        try:
-            self.kursor.execute(f'INSERT IGNORE INTO {self._name} ({columns}) VALUES ({values})', data)
-            self.rows = self.__rows__()
-            if self.verbose:
-                echo.info(f"{self.kursor.rowcount} record inserted into {self._name}")
-
-        except SqlError as error:
-            echo.alert(error)
-
-    def update(self, id, **kwargs):
-        data = tuple(kwargs.values())
-        columns = f"{'=%s, '.join(kwargs.keys())}=%s"
-        try:
-            self.kursor.execute(f"UPDATE {self._name} SET {columns} WHERE {self.primarykey}={id}", data)
-            echo.info(f"Updated Row: {id} Column(s): {columns.replace('=%s', '')}")
-
-        except SqlError as error:
-            echo.alert(error)
-
-    def delete(self, id, row):
-        try:
-            self.kursor.execute(f"DELETE FROM {self._name} WHERE {id}={row}")
-            echo.info(f"Deleted row {row} from {self._name}")
-
-        except SqlError as error:
-            echo.alert(error)
-
-    def add(self, column, datatype, location='last'):
-        self.kursor.execute(f"ALTER TABLE {self._name} ADD COLUMN {column} {datatype} {location}")
-        echo.info(f"Added Column {column} To {self._name}")
-
-    def drop(self, column):
-        try:
-            self.kursor.execute(f'ALTER TABLE {self._name} DROP COLUMN {column}')
-            echo.info(f"Dropped column {column} from {self._name}")
-            self.renumber()
-
-        except SqlError as error:
-            echo.alert(error)
-
-    def rename(self, column, new_name):
-        try:
-            self.kursor.execute(f'ALTER TABLE {self._name} RENAME COLUMN {column} TO {new_name}')
-            echo.info(f"Column {column} has been renamed {new_name}")
-
-        except SqlError as error:
-            echo.alert(error)
-
-    def renumber(self):
-        try:
-            if self.primarykey:
-                self.kursor.execute(f'ALTER TABLE {self._name} DROP COLUMN {self.primarykey}')
-                self.kursor.execute(f'ALTER TABLE {self._name} ADD COLUMN {self.primarykey} INT NOT NULL AUTO_INCREMENT PRIMARY KEY FIRST')
-                echo.info(f"{self._name} {self.primarykey} index reset")
+            except SqlError as error:
+                echo.alert(error)
             else:
-                self.primarykey = 'id'
-                self.kursor.execute(f'ALTER TABLE {self._name} ADD COLUMN id INT NOT NULL AUTO_INCREMENT PRIMARY KEY FIRST')
-                echo.info(f"{self._name} {self.primarykey} index created")
-
-        except SqlError as error:
-            echo.alert(error)
-
-    def record_exists(self, column, data):
-        try:
-            self.kursor.execute(f"SELECT EXISTS(SELECT 1 FROM {self._name} WHERE {column}='{data}' LIMIT 1)")
-            return self.kursor.fetchone()[0]
-
-        except SqlError as error:
-            echo.alert(error)
-
-    def distinct(self, *columns, count=False):
-        selection = ', '.join(columns)
-        if count:
-            return f"SELECT COUNT(DISTINCT {self.selection}) FROM {self._name}"
-        return f"SELECT DISTINCT {self.selection}) FROM {self._name}"
-
-    def select(self, columns: str, **kwargs):
-        return self.Selector(self._name, columns, **kwargs)
-
-    class Selector:
-
-        def __new__(cls, name: str, columns: str, filter: bool=False, sort: str=None, limit: str=None):
-            columns = columns.strip()
-            order = '' if sort is None else f"ORDER BY {sort}"
-            limit = '' if limit is None else f"LIMIT {limit}"
-            if filter is False:
-                columns = ', '.join(columns.replace(',', '').split())
-                columns = columns if columns else 'ALL'
-                cls.kursor.execute(f"SELECT {columns} FROM {name} {order} {limit}".strip())
-                return cls.kursor.fetchall()
-            return object.__new__(cls)
-
-        def __init__(self, name, columns: str, **kwargs: str) -> None:
-            self.opts = CustomDict(**kwargs)
-            self.opts.add(sort='')
-            self.opts.add(limit='')
-            self._name = name
-            self.selection = 'ALL' if columns is None else columns.replace(' ', ', ')
-            self.order = f"ORDER BY {self.opts['sort']}" if self.opts['sort'] else ''
-            self.limit = f"LIMIT {self.opts['limit']}" if self.opts['limit'] else ''
-
-        def __repr__(self):
-            return f"You must call select.where(condition) if the filter flag is set to True"
-
-        def expand(self, key, value):
-            result = expansions.match(value).group(0)
-            return expander[expansion_operators.search(result).group(0)](key, value)
-
-        def where(self, condition: str=None, operator: str='OR', **kwargs: str) -> None:
-            if condition:
-                self.kursor.execute(f"SELECT {self.selection} FROM {self._name} WHERE {condition}".strip())
                 return self.kursor.fetchall()
 
-            statements = []
-            conditions = []
-            for key, value in kwargs.items():
-                values = logic.split(value)
-                for value in values:
-                    if expansions.match(value):
-                        clause = self.expand(key, value)
-                        statements.append(clause)
-                    else:
-                        clause = f"{key}='{value}'"
-                        statements.append(clause)
-                    conditions.append(' OR '.join(statements))
+        def write(self, **kwargs):
+            """insert data into the table
+
+               ARGUMENTS:
+                    uses keyword arguments:
+                        key:   n/a: column name
+                        value: str: data written to specified column
+
+               USAGE:
+                    db.table.write(**data)
+                    db.table.write(column=data, column=data, column=data)
+            """
+            data = tuple(kwargs.values())
+            columns = ', '.join(kwargs.keys())
+            values = ('%s, ' * len(data)).strip(', ')
+            try:
+                self.kursor.execute(f'INSERT IGNORE INTO {self._name} ({columns}) VALUES ({values})', data)
+                if self.verbose:
+                    echo.info(f"{self.kursor.rowcount} record inserted into {self._name}")
+
+            except SqlError as error:
+                echo.alert(error)
+
+        def update(self, id, **kwargs):
+            """update columns in a table row with new data
+
+               ARGUMENTS:
+                    id:     int: str: the row number or id
+                    kwargs:      str: column_name=new_data
+
+               USAGE:
+                    db.table.update('10', name='Someone', email='someone@example.com')
+            """
+            data = tuple(kwargs.values())
+            columns = f"{'=%s, '.join(kwargs.keys())}=%s"
+            try:
+                self.kursor.execute(f"UPDATE {self._name} SET {columns} WHERE {self.primary}={id}", data)
+                echo.info(f"Updated Row: {id} Column(s): {columns.replace('=%s', '')}")
+
+            except SqlError as error:
+                echo.alert(error)
+
+        def delete(self, id, value):
+            """delete a record in the table
+
+               ARGUMENTS:
+                    id:     str:      column containing row ids (usually named id)
+                    value:  str: int: value that indicates the row to be deleted
+
+               USAGE:
+                    db.table.delete('user_id', '12')
+            """
+            try:
+                self.kursor.execute(f"DELETE FROM {self._name} WHERE {id}={value}")
+                echo.info(f"Deleted row {value} from {self._name}")
+
+            except SqlError as error:
+                echo.alert(error)
+
+        def add(self, column, datatype, location='last'):
+            """add a column to table
+
+               ARGUMENTS:
+                    column:   str: name of the new column
+                    datatype: str: data type of new column i.e varchar(255)
+                    location: str: where in the table the column will be inserted
+                                   options are: 
+                                        'first', 'last' or f'after {column}'
+
+               USAGE:
+                    db.table.add('lastname', 'varchar(100)', location='after firstname')
+            """
+            self.kursor.execute(f"ALTER TABLE {self._name} ADD COLUMN {column} {datatype} {location}")
+            echo.info(f"Added Column {column} To {self._name}")
+
+        def drop(self, column):
+            """drop a column from the table
+
+               ARGUMENTS:
+                    column: str: name of the new column
+
+               USAGE:
+                    db.table.drop('lastname')
+            """
+            try:
+                self.kursor.execute(f'ALTER TABLE {self._name} DROP COLUMN {column}')
+                echo.info(f"Dropped column {column} from {self._name}")
+                self.renumber()
+
+            except SqlError as error:
+                echo.alert(error)
+
+        def rename(self, column, new_name):
+            """rename an column in the table"""
+            try:
+                self.kursor.execute(f'ALTER TABLE {self._name} RENAME COLUMN {column} TO {new_name}')
+                echo.info(f"Column {column} has been renamed {new_name}")
+
+            except SqlError as error:
+                echo.alert(error)
+
+        def renumber(self):
+            """renumber all rows starting with 1. expects conventional primary key.
+               fallback tries to renumber by a column named 'id' else it 
+               fails gracefully.
+            """
+            primary_key = self.primary
+            try:
+                if primary_key:
+                    self.kursor.execute(f'ALTER TABLE {self._name} DROP COLUMN {primary_key}')
+                    self.kursor.execute(f'ALTER TABLE {self._name} ADD COLUMN {primary_key} INT NOT NULL AUTO_INCREMENT PRIMARY KEY FIRST')
+                    echo.info(f"{self._name} {primary_key} index reset")
+                else:
+                    primary_key = 'id'
+                    self.kursor.execute(f'ALTER TABLE {self._name} ADD COLUMN id INT NOT NULL AUTO_INCREMENT PRIMARY KEY FIRST')
+                    echo.info(f"{self._name} {primary_key} index created")
+
+            except SqlError as error:
+                echo.alert(error)
+
+        def record_exists(self, column, data):
+            """boolean test for the existence of a record within the table
+
+               ARGUMENTS:
+                    column: str: name of the target column
+                    data:   str: the desired record  
+
+               USAGE:
+                   if db.users.record_exists('email', 'someone@example.com'):
+                       perform some operation....
+            """
+            try:
+                self.kursor.execute(f"SELECT EXISTS(SELECT 1 FROM {self._name} WHERE {column}='{data}' LIMIT 1)")
+                return self.kursor.fetchone()[0]
+
+            except SqlError as error:
+                echo.alert(error)
+
+        def distinct(self, column, count=False):
+            """select distinct records from specified column in the table
+               returns the number of distinct records if count=True
+
+               ARGUMENTS:
+                    columns: str: column name
+
+               USAGE:
+                    data = db.users.distinct('lastname', 'country')
+                    data = db.users.distinct('firstname', count=True)
+            """
+            try:
+                if count:
+                    self.kursor.execute(f"SELECT COUNT(DISTINCT {column}) FROM {self._name}")
+                    return self.kursor.fetchone()[0]
+
+                self.kursor.execute(f"SELECT DISTINCT {column} FROM {self._name}")
+                result = self.kursor.fetchall()
+                return tuple(chain(*result))
+
+            except SqlError as error:
+                echo.alert(error)
+
+        def select(self, *columns: str):
+            """create selection objects targeting single or multiple columns:
+               creates a Table.Selector object
+
+               ARGUMENTS:
+                    columns: str: a list of target columns names
+
+               USAGE:
+                    assuming a table in the database called 'subscribers':
+
+                        cities = db.subscribers.select('city')
+                        people = db.subscribers.select('people')
+
+                    filter each selection object as desired
+
+                    for complex clauses pass an explicit sql statement as str:
+                        cities.where("city like '%ville order by city desc")
+
+                    for brevity:
+                        cities.all()
+                        cities.where(people='Al or Bob or Vlad')
+                        cities.where(op='or', gender='female', income='60000..80000')
+
+                        people.all(sort='country desc', limit=10)
+                        people.where(people='Al or Vlad', city='London or Moscow')
+
+                    filtering:
+                        where(people='tom', city='London or Moscow')
+                        WHERE people EQUALS tom AND city EQUALS London OR city EQUALS Moscow;
+
+                        where(operator='or', people='tom', city='london or moscow')
+                        WHERE people EQUALS tom OR city EQUALS London OR city EQUALS Moscow;
+
+                        where(id='1..1000')
+                        WHERE id BETWEEN 1 AND 10000';
+
+                        where(id='1..1000', city='Berlin..London')
+                        WHERE id BETWEEN 1 AND 10000 AND city BETWEEN Berlin AND London;
+
+                        where(op='or, id='1..1000', city='berlin..london')
+                        WHERE id BETWEEN 1 AND 10000 OR city BETWEEN Berlin AND London;
+            """
+            return self.Selector(columns)
+
+        @BoundInnerClass
+        class Selector:
+
+            def __init__(self, outer, columns):
+                self._name = outer._name
+                self._base = outer._base
+                self.columns = ', '.join(columns)
+
+            def __repr__(self):
+                return f"{self._base}.{self._name}.{type(self).__name__}({self.columns})"
+
+            def all(self, sort=None, limit=None):
+                """select all results from the selection
+
+                   ARGUMENTS:
+                        sort:       str: sort the results
+                        limit:      str: limit results to a specifc number
+
+                   USAGE:
+                        selection = Table.select('people')
+                        results = selection.all()
+                        results = selection.all(sort='people desc', limit=10)
+                """
+                limit = f"LIMIT {limit}" if limit else ''
+                order = f"ORDER BY {sort}" if sort else ''
+                query = f"SELECT {self.columns} FROM {self._name} {order} {limit}"
+                try:
+                    self.kursor.execute(query.strip())
+                    return self.kursor.fetchall()
+
+                except SqlError as error:
+                    echo.alert(error)
+
+            def expand(self, key, value):
+                """check and process expansion syntax"""
+                result = expansions.match(value).group(0)
+                return expander[expansion_operators.search(result).group(0)](key, value)
+
+            def where(self, condition=None, op='and', sort=None, limit=None, **kwargs):
+                """filter the Table.selection results
+
+                   ARGUMENTS:
+                        condition:  str: an explicit sql statement;
+                                         passing condition overides all 
+                                         other options.
+
+                        op:         str: logical operator applied between
+                                         compound statements. defaults to AND
+
+                                         examples:
+                                             where(name='AL', city='LA')
+                                             WHERE name = Al AND city = LA 
+
+                                             where(op='or', name='AL', city='LA')
+                                             WHERE name = Al OR city = LA 
+
+                        sort:       str: sort the results
+                        limit:      str: limit results to a specifc number
+                        kwargs:     str: conditions as key-value pairs
+
+                    USAGE:
+                        where(people='tom', city='London or Moscow')
+                        WHERE people EQUALS tom AND city EQUALS London OR city EQUALS Moscow;
+
+                        where(operator='or', people='tom', city='london or moscow')
+                        WHERE people EQUALS tom OR city EQUALS London OR city EQUALS Moscow;
+
+                        where(id='1..1000')
+                        WHERE id BETWEEN 1 AND 10000';
+
+                        where(id='1..1000', city='Berlin..London')
+                        WHERE id BETWEEN 1 AND 10000 AND city BETWEEN Berlin AND London;
+
+                        where(op='or, id='1..1000', city='berlin..london')
+                        WHERE id BETWEEN 1 AND 10000 OR city BETWEEN Berlin AND London;
+
+                        pre-format where clauses
+                        clause_1 = {'city': 'Berlin', 'sort': 'city', 'limit': 10}
+                        clause_2 = {'logic': 'or', 'people': 'Al or Bob', 'city': 'Berlin..London'}
+
+                        db.table.select('people').where(**clause_1)
+                        db.table.select('people').where(**clause_2)
+                """
+                if condition:
+                    query = f"SELECT {self.columns} FROM {self._name} WHERE {condition}"
+                    self.kursor.execute(query.strip())
+                    return self.kursor.fetchall()
+
+                limit = f"LIMIT {limit}" if limit else ''
+                order = f"ORDER BY {sort}" if sort else ''
+                statements = []
+                conditions = []
+                for key, value in kwargs.items():
+                    values = logic.split(value)
+                    for value in values:
+                        if expansions.match(value):
+                            clause = self.expand(key, value)
+                            statements.append(clause)
+                        else:
+                            clause = f"{key}='{value}'"
+                            statements.append(clause)
+                    statement = ' OR '.join(statements)
+                    conditions.append(statement)
                     statements.clear()
 
-            chain = f' {operator} '.join(conditions)
-            self.kursor.execute(f"SELECT {self.selection} FROM {self._name} WHERE {chain} {self.order} {self.limit}".strip())
-            return self.kursor.fetchall()
+                chain = f' {op} '.join(conditions)
+                query = f"SELECT {self.columns} FROM {self._name} WHERE {chain} {order} {limit}"
+                try:
+                    self.kursor.execute(query.strip())
+                    return self.kursor.fetchall()
+
+                except SqlError as error:
+                    echo.alert(error)
