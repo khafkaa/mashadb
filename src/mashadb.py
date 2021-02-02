@@ -25,9 +25,8 @@ class MashaDB:
                 db.table.write(**data)
 
             read operations:
-                data = db.table.select(all)
-                data = db.table.select(column, column, column)
-                data = db.table.select(column, filter=True).where(condition)
+                data = db.table.select(column, column).all(sort=column)
+                data = db.table.select(column).where(clause, limit=10)
 
             with context manager:
                 automatically commits data and closes the connection.
@@ -46,7 +45,6 @@ class MashaDB:
                           username: str='VARCHAR(40)',
                           password: str='VARCHAR(255)')
     """
-
     def __init__(self, **kwargs):
         """ARGUMENTS:
                 required:
