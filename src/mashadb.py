@@ -170,7 +170,8 @@ class MashaDB:
                 statement.append(f"{key} {value}")
         try:
             self.kursor.execute(f"CREATE TABLE IF NOT EXISTS {table}({', '.join(statement)})")
-            echo.info(f'Created Table {table}')
+            if self.verbose:
+                echo.info(f'Created Table {table}')
 
         except SqlError as error:
             echo.alert(f"{error}")
@@ -195,8 +196,10 @@ class MashaDB:
 
         except SqlError as error:
             echo.alert(error)
+
         else:
-            echo.info(f"Table {table} has been deleted.")
+            if self.verbose:
+                echo.info(f"Table {table} has been deleted.")
 
     def rename(self, table, new_name):
         """rename a table in the database.
@@ -236,7 +239,8 @@ class MashaDB:
         """roll back the current transaction and cancel its changes"""
         try:
             self.konnect.rollback()
-            echo.info("Rollback Successful")
+            if self.verbose:
+                echo.info("Rollback Successful")
 
         except SqlError as error:
             echo.alert(error)
@@ -276,7 +280,7 @@ class MashaDB:
                     db.users.rows             list row count
                     db.users.columns          list column names
                     db.users.write(**kwargs)  write data to the table
-                    db.usrs.select(column)    lookup data in the table
+                    db.users.select(column)    lookup data in the table
         """
 
         def __init__(self, outer, tablename):
@@ -365,7 +369,8 @@ class MashaDB:
             columns = f"{'=%s, '.join(kwargs.keys())}=%s"
             try:
                 self.kursor.execute(f"UPDATE {self._name} SET {columns} WHERE {self.primary}={id}", data)
-                echo.info(f"Updated Row: {id} Column(s): {columns.replace('=%s', '')}")
+                if self.verbose:
+                    echo.info(f"Updated Row: {id} Column(s): {columns.replace('=%s', '')}")
 
             except SqlError as error:
                 echo.alert(error)
@@ -382,7 +387,8 @@ class MashaDB:
             """
             try:
                 self.kursor.execute(f"DELETE FROM {self._name} WHERE {id}={value}")
-                echo.info(f"Deleted row {value} from {self._name}")
+                if self.verbose:
+                    echo.info(f"Deleted row {value} from {self._name}")
 
             except SqlError as error:
                 echo.alert(error)
@@ -414,7 +420,8 @@ class MashaDB:
             """
             try:
                 self.kursor.execute(f'ALTER TABLE {self._name} DROP COLUMN {column}')
-                echo.info(f"Dropped column {column} from {self._name}")
+                if self.verbose:
+                    echo.info(f"Dropped column {column} from {self._name}")
                 self.renumber()
 
             except SqlError as error:
@@ -424,7 +431,8 @@ class MashaDB:
             """rename an column in the table"""
             try:
                 self.kursor.execute(f'ALTER TABLE {self._name} RENAME COLUMN {column} TO {new_name}')
-                echo.info(f"Column {column} has been renamed {new_name}")
+                if self.verbose:
+                    echo.info(f"Column {column} has been renamed {new_name}")
 
             except SqlError as error:
                 echo.alert(error)
@@ -439,11 +447,13 @@ class MashaDB:
                 if primary_key:
                     self.kursor.execute(f'ALTER TABLE {self._name} DROP COLUMN {primary_key}')
                     self.kursor.execute(f'ALTER TABLE {self._name} ADD COLUMN {primary_key} INT NOT NULL AUTO_INCREMENT PRIMARY KEY FIRST')
-                    echo.info(f"{self._name} {primary_key} index reset")
+                    if self.verbose:
+                        echo.info(f"{self._name} {primary_key} index reset")
                 else:
                     primary_key = 'id'
                     self.kursor.execute(f'ALTER TABLE {self._name} ADD COLUMN id INT NOT NULL AUTO_INCREMENT PRIMARY KEY FIRST')
-                    echo.info(f"{self._name} {primary_key} index created")
+                    if self.verbose:
+                        echo.info(f"{self._name} {primary_key} index created")
 
             except SqlError as error:
                 echo.alert(error)
