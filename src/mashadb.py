@@ -54,11 +54,11 @@ class MashaDB:
                     database=database_name
 
                 optional:
-                    any other keyword arguments that must be passed to 
-                    mysql.connector to ensure its system compatibilty and 
-                    function. 
+                    any other keyword arguments that must be passed to
+                    mysql.connector to ensure its system compatibilty and
+                    function.
 
-                    see mysql-connector docs for all possible arguments 
+                    see mysql-connector docs for all possible arguments
                     and information:
 
                     https://dev.mysql.com/doc/connector-python/en/connector-python-connectargs.html
@@ -67,12 +67,12 @@ class MashaDB:
            USAGE:
                 pass a dict with parameters:
                    config = {
-                        user: username, 
-                        password: password, 
+                        user: username,
+                        password: password,:
                         hostname: host,
                         port: 3306,
                         database: database_name,
-                        auth_plugin: 'mysql_native_password' 
+                        auth_plugin: 'mysql_native_password'
                         }
 
                    db = MashaDB(**config)
@@ -255,10 +255,10 @@ class MashaDB:
 
     @BoundInnerClass
     class Table:
-        """dynamic bound inner class of the MashaDB database object. 
+        """dynamic bound inner class of the MashaDB database object.
 
-           each table in the target database is modeled as an attribute 
-           of the database object and is instantiated when operations require 
+           each table in the target database is modeled as an attribute
+           of the database object and is instantiated when operations require
            access to the associated database table.
 
            since a table is a child attribute of the database object, it
@@ -319,9 +319,9 @@ class MashaDB:
             """returns information about data stored within the table.
 
                this method is called by __repr__, which formats the
-               output using a pandas dataframe. This provides an elegant  
-               display while using the repl, but there is considerable  
-               overhead when loading the pandas module. It has no use in  
+               output using a pandas dataframe. This provides an elegant
+               display while using the repl, but there is considerable
+               overhead when loading the pandas module. It has no use in
                production so my advice is to disable it.
             """
             try:
@@ -400,7 +400,7 @@ class MashaDB:
                     column:   str: name of the new column
                     datatype: str: data type of new column i.e varchar(255)
                     location: str: where in the table the column will be inserted
-                                   options are: 
+                                   options are:
                                         'first', 'last' or f'after {column}'
 
                USAGE:
@@ -439,7 +439,7 @@ class MashaDB:
 
         def renumber(self):
             """renumber all rows starting with 1. expects conventional primary key.
-               fallback tries to renumber by a column named 'id' else it 
+               fallback tries to renumber by a column named 'id' else it
                fails gracefully.
             """
             primary_key = self.primary
@@ -463,7 +463,7 @@ class MashaDB:
 
                ARGUMENTS:
                     column: str: name of the target column
-                    data:   str: the desired record  
+                    data:   str: the desired record
 
                USAGE:
                    if db.users.record_exists('email', 'someone@example.com'):
@@ -586,7 +586,7 @@ class MashaDB:
 
                    ARGUMENTS:
                         condition:  str: an explicit sql statement;
-                                         passing condition overides all 
+                                         passing condition overides all
                                          other options.
 
                         op:         str: logical operator applied between
@@ -594,10 +594,10 @@ class MashaDB:
 
                                          examples:
                                              where(name='AL', city='LA')
-                                             WHERE name = Al AND city = LA 
+                                             WHERE name = Al AND city = LA
 
                                              where(op='or', name='AL', city='LA')
-                                             WHERE name = Al OR city = LA 
+                                             WHERE name = Al OR city = LA
 
                         sort:       str: sort the results
                         limit:      str: limit results to a specifc number
