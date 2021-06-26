@@ -1,3 +1,4 @@
+"""assorted auxillary functions"""
 import re
 from functools import partial
 from collections import namedtuple
@@ -63,21 +64,18 @@ expansions = re.compile(r'(^%.+|.+%$|^.+%.+$|.*?\.\..*|^[+-].+)')
 
 
 def expComp(key, value):
-    """Exapand Comparison Operators
-    """
+    """Exapand Comparison Operators"""
     return f"{key}{multisub({'+': ' >= ', '-': ' <= '}, value)}"
 
 
 def expRange(key, value):
-    """Expand a range of values to MySQL BETWEEN statement
-    """
+    """Expand a range of values to MySQL BETWEEN statement"""
     low, high = value.split('..')
     return f"{key} BETWEEN '{low}' AND '{high}'"
 
 
 def expLike(key, value):
-    """Expand SQL wildcard characters to LIKE statement
-    """
+    """Expand SQL wildcard characters to LIKE statement"""
     return f"{key} LIKE '{value}'"
 
 

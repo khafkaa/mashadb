@@ -1,6 +1,6 @@
 from itertools import chain
 import mysql.connector as engine
-from mysql.connector import Error as SqlError
+from mysql.connector import Error as SQLError
 from pandas import DataFrame as df
 
 from src.utilities import echo
@@ -14,75 +14,89 @@ class MashaDB:
     """python interface for MySQL and MariaDB
 
        USAGE:
-            connect and commit:
-                db = MashaDB(**config)
-                db.connect()
-                db.commit()
-                db.closeall()
+            Connect and Commit:
 
-            write operations:
-                db.table.write(column=data, column=data, column=data)
+            db = MashaDB(**config)
+            db.connect(database=db_name)
+            db.commit()
+            db.closeall()
+
+            Write Operations:
+
+            db.table.write(column=data, column=data, column=data)
+            db.table.write(**data)
+
+            Read Operations:
+
+            data = db.table.select(column, column).all(sort=column)
+            data = db.table.select(column).where(clause, limit=10)
+
+            With Context Manager:
+            Automatically commits data and closes the connection.
+
+            from functools import partial
+            masha = partial(MashaDB, **config)
+
+            with masha(database=database) as db:
                 db.table.write(**data)
-
-            read operations:
-                data = db.table.select(column, column).all(sort=column)
-                data = db.table.select(column).where(clause, limit=10)
-
-            with context manager:
-                automatically commits data and closes the connection.
-
-                from functools import partial
-                masha = partial(MashaDB, **config)
-
-                with masha(database=database) as db:
-                    db.table.write(**data)
-                    query = db.table.select(column)
+                query = db.table.select(column).all()
 
             create a table:
-                db.create(table: str, **kwargs: str)
-                db.create(table: str,
-                          id: str='INT AUTO_INCREMENT PRIMARY KEY'
-                          username: str='VARCHAR(40)',
-                          password: str='VARCHAR(255)')
+            db.create(table: str, **kwargs: str)
+            db.create(table: str,
+                      id: str='INT AUTO_INCREMENT PRIMARY KEY'
+                      username: str='VARCHAR(40)',
+                      password: str='VARCHAR(255)'
+                )
     """
+
     def __init__(self, **kwargs):
-        """ARGUMENTS:
-                required:
-                    user=username
-                    password=password
-                    host=hostname
-                    database=database_name
+        """ ARGUMENTS:
+                Required:
 
-                optional:
-                    any other keyword arguments that must be passed to
-                    mysql.connector to ensure its system compatibilty and
-                    function.
+                user=username
+                password=password
+                host=hostname
 
-                    see mysql-connector docs for all possible arguments
-                    and information:
+                Optional:
 
-                    https://dev.mysql.com/doc/connector-python/en/connector-python-connectargs.html
-                    https://dev.mysql.com/doc/connector-python/en/connector-python-reference.html
+                database=database_name
 
-           USAGE:
+                any other keyword arguments that must be passed to
+                mysql.connector to ensure its system compatibilty and
+                function.
+
+                see mysql-connector docs for all possible arguments and information:
+
+                https://dev.mysql.com/doc/connector-python/en/connector-python-connectargs.html
+                https://dev.mysql.com/doc/connector-python/en/connector-python-reference.html
+
+            USAGE:
                 pass a dict with parameters:
-                   config = {
-                        user: username,
-                        password: password,:
-                        hostname: host,
-                        port: 3306,
-                        database: database_name,
-                        auth_plugin: 'mysql_native_password'
-                        }
 
-                   db = MashaDB(**config)
+                config = {
+                    user: username,
+                    password: password,:
+                    hostname: host,
+                    port: 3306,
+                    database: database_name,
+                    auth_plugin: 'mysql_native_password'
+                }
+
+                db = MashaDB(**config)
 
                 pass keyword arguments:
-                    db = MashaDB(user=user, password=password, host=host, database=database)
+                db = MashaDB(user=user, password=password, host=host, database=database)
         """
-        self.config = kwargs
         self.verbose = True
-        self.version = None
+        self.config = kwargs
+        self.host = self.config['host']
+        self.database = self.config.get('database')
+
+    def __server_connect__(self):
+        self.konnect = engine.connect(**self.config)
+        self.kursor = self.konnect.cursor(buffered=True)
+        self.version = self.konnect.get_server_info()
 
     def __enter__(self):
         self.verbose = False
@@ -99,11 +113,16 @@ class MashaDB:
     def __status__(self):
         """displays database and connection status"""
         name = type(self).__name__
-        connected = f"{name} Version {self.version}: Connected to Database: {self.config['database']}"
-        disconnected = f'{name} Version {self.version} Status Disconnected.'
-        if self.version:
+        version = self.__dict__.get('version')
+        connection_type = self.config.get('database', self.host)
+
+        connected = f"{name} Version {version}: Connected to {connection_type}"
+        disconnected = f'{name} Version {version} Status Disconnected.'
+
+        if version:
             return connected if self.konnect.is_connected() else disconnected
-        return f"Use {name}.connect() to connect to {self.config['host']}."
+
+        return f"{name} isn't connected. Use obj.connect() to connect to {self.host}."
 
     def __update_tables__(self):
         """database tables are added as object attributes"""
@@ -112,30 +131,59 @@ class MashaDB:
                 setattr(self, table, self.Table(table))
 
     @property
+    def databases(self):
+        """returns list of databases"""
+        try:
+            self.kursor.execute('SHOW DATABASES')
+            return tuple(chain(*self.kursor.fetchall()))
+
+        except SQLError as error:
+            echo.alert(error)
+
+    @property
     def tables(self):
         """returns a list of tables contained in the database"""
         try:
             self.kursor.execute("SHOW TABLES")
-            result = self.kursor.fetchall()
-            return tuple(chain(*result))
+            return tuple(chain(*self.kursor.fetchall()))
 
-        except (AttributeError, SqlError):
+        except (AttributeError, SQLError):
             echo.alert(f'{type(self).__name__} is not connected to a database')
 
-    def connect(self):
-        """establish a connection with the target MySQL database"""
+    def connect(self, database=None):
+        if database:
+            self.config.update({'database': database})
+
+        connection = self.config.get('database', self.host)
+
         try:
-            self.konnect = engine.connect(**self.config)
-            self.kursor = self.konnect.cursor(buffered=True)
-            self.version = self.konnect.get_server_info()
-
-            if self.konnect.is_connected():
+            self.__server_connect__()
+            if connection != self.host and self.konnect.is_connected():
                 self.__update_tables__()
-                if self.verbose:
-                    echo.info(f"MariaDB {self.version}\nConnected to Database: {self.config['database']}")
 
-        except SqlError as error:
-            echo.alert(f"Connection Error: {error}")
+            if self.verbose:
+                echo.info(f"MashaDB {self.version} Connected to {connection}")
+
+                if connection == self.host:
+                    echo.info(("Use obj.connect(database='database_name'"
+                               " to connect to a specific database."))
+
+        except SQLError as error:
+            echo.alert(error)
+
+    def execute(self, query):
+        """execute any mysql command or statement"""
+        try:
+            self.kursor.execute(query)
+            if self.kursor.with_rows:
+                return tuple(chain(*self.kursor.fetchall()))
+
+            else:
+                if self.verbose:
+                    echo.info(f"Number of affected rows: {self.kursor.rowcount}")
+
+        except SQLError as error:
+            echo.alert(error)
 
     def table_exists(self, table):
         """checks for the existence of a table in the database"""
@@ -151,7 +199,7 @@ class MashaDB:
         """create a new table in the database.
 
            ARGUMENTS:
-                uses positional and keyword arguments: 
+                uses positional and keyword arguments:
 
                 table: str: the new table name
                 keyword:    the column name
@@ -161,6 +209,14 @@ class MashaDB:
                 db.create('table', **kwargs)
                 db.create('table', column='datatype', column='datatype')
                 db.create('users', id='INT AUTO_INCREMENT PRIMARY KEY')
+
+                import Columns, Primary
+
+                primary = Primary()
+                name = Column('VARCHAR(100)')
+                email = Column('VARCHAR(255', unique=True)
+
+                db.create(id=primary.key, Name=name.column, Email=email.column)
         """
         statement = []
         for key, value in kwargs.items():
@@ -169,11 +225,12 @@ class MashaDB:
             else:
                 statement.append(f"{key} {value}")
         try:
+            # print(f"CREATE TABLE IF NOT EXISTS {table}({', '.join(statement)})")
             self.kursor.execute(f"CREATE TABLE IF NOT EXISTS {table}({', '.join(statement)})")
             if self.verbose:
                 echo.info(f'Created Table {table}')
 
-        except SqlError as error:
+        except SQLError as error:
             echo.alert(f"{error}")
         else:
             setattr(self, table, self.Table(table))
@@ -194,7 +251,7 @@ class MashaDB:
         except AttributeError:
             echo.alert(f"The table '{table}' does not exist")
 
-        except SqlError as error:
+        except SQLError as error:
             echo.alert(error)
 
         else:
@@ -218,7 +275,7 @@ class MashaDB:
         except AttributeError:
             echo.alert(f"The table '{table}' does not exist")
 
-        except SqlError as error:
+        except SQLError as error:
             echo.alert(error)
 
         else:
@@ -232,7 +289,7 @@ class MashaDB:
             if self.verbose:
                 echo.info("Data Commit")
 
-        except SqlError as error:
+        except SQLError as error:
             echo.alert(error)
 
     def rollback(self):
@@ -242,7 +299,7 @@ class MashaDB:
             if self.verbose:
                 echo.info("Rollback Successful")
 
-        except SqlError as error:
+        except SQLError as error:
             echo.alert(error)
 
     def closeall(self):
@@ -253,7 +310,7 @@ class MashaDB:
             if self.verbose:
                 echo.info("MariaDB Server Has Disconnected. Session Ended.")
 
-    @BoundInnerClass
+    @ BoundInnerClass
     class Table:
         """dynamic bound inner class of the MashaDB database object.
 
@@ -265,22 +322,23 @@ class MashaDB:
            is called usings standard dot notation.
 
            EXAMPLE:
-                create a new database object:
-                    db = MashaDB(**config)
 
-                connect to the target database:
-                    db.connect()
+            create a new database object:
+                db = MashaDB(**config)
 
-                list tables in the database:
-                    db.tables
+            connect to the target database:
+                db.connect()
 
-                to perform operations on a table named 'users':
+            list tables in the database:
+                db.tables
 
-                    db.users                  describes table users
-                    db.users.rows             list row count
-                    db.users.columns          list column names
-                    db.users.write(**kwargs)  write data to the table
-                    db.users.select(column)    lookup data in the table
+            to perform operations on a table named 'users':
+
+                db.users                  describes table users
+                db.users.rows             list row count
+                db.users.columns          list column names
+                db.users.write(**kwargs)  write data to the table
+                db.users.select(column)   lookup data in the table
         """
 
         def __init__(self, outer, tablename):
@@ -297,18 +355,19 @@ class MashaDB:
         def __str__(self):
             return self._name
 
-        @property
+        @ property
         def rows(self):
             self.kursor.execute(f"SELECT COUNT(*) FROM {self._name};")
             return self.kursor.fetchone()[0]
 
-        @property
+        @ property
         def columns(self):
             return [column[0] for column in self.describe()]
 
-        @property
+        @ property
         def primary(self):
-            self.kursor.execute(f"SELECT COLUMN_NAME from information_schema.KEY_COLUMN_USAGE where TABLE_NAME='{self._name}' and constraint_name = 'PRIMARY'")
+            self.kursor.execute(f"SELECT COLUMN_NAME from information_schema.KEY_COLUMN_USAGE \
+                                where TABLE_NAME='{self._name}' and constraint_name = 'PRIMARY'")
             try:
                 return self.kursor.fetchone()[0]
 
@@ -327,7 +386,7 @@ class MashaDB:
             try:
                 self.kursor.execute(f"DESC {self._name};")
 
-            except SqlError as error:
+            except SQLError as error:
                 echo.alert(error)
             else:
                 return self.kursor.fetchall()
@@ -336,13 +395,13 @@ class MashaDB:
             """insert data into the table
 
                ARGUMENTS:
-                    uses keyword arguments:
-                        key:   n/a: column name
-                        value: str: data written to specified column
+                uses kwargs:
+                key:   n/a: column name
+                value: str: data written to specified column
 
                USAGE:
-                    db.table.write(**data)
-                    db.table.write(column=data, column=data, column=data)
+                db.table.write(**data)
+                db.table.write(column=data, column=data, column=data)
             """
             data = tuple(kwargs.values())
             columns = ', '.join(kwargs.keys())
@@ -352,7 +411,7 @@ class MashaDB:
                 if self.verbose:
                     echo.info(f"{self.kursor.rowcount} record inserted into {self._name}")
 
-            except SqlError as error:
+            except SQLError as error:
                 echo.alert(error)
 
         def update(self, id, **kwargs):
@@ -372,7 +431,7 @@ class MashaDB:
                 if self.verbose:
                     echo.info(f"Updated Row: {id} Column(s): {columns.replace('=%s', '')}")
 
-            except SqlError as error:
+            except SQLError as error:
                 echo.alert(error)
 
         def delete(self, id, value):
@@ -390,7 +449,7 @@ class MashaDB:
                 if self.verbose:
                     echo.info(f"Deleted row {value} from {self._name}")
 
-            except SqlError as error:
+            except SQLError as error:
                 echo.alert(error)
 
         def add(self, column, datatype, location='last'):
@@ -424,7 +483,7 @@ class MashaDB:
                     echo.info(f"Dropped column {column} from {self._name}")
                 self.renumber()
 
-            except SqlError as error:
+            except SQLError as error:
                 echo.alert(error)
 
         def rename(self, column, new_name):
@@ -434,7 +493,7 @@ class MashaDB:
                 if self.verbose:
                     echo.info(f"Column {column} has been renamed {new_name}")
 
-            except SqlError as error:
+            except SQLError as error:
                 echo.alert(error)
 
         def renumber(self):
@@ -455,7 +514,7 @@ class MashaDB:
                     if self.verbose:
                         echo.info(f"{self._name} {primary_key} index created")
 
-            except SqlError as error:
+            except SQLError as error:
                 echo.alert(error)
 
         def record_exists(self, column, data):
@@ -473,7 +532,7 @@ class MashaDB:
                 self.kursor.execute(f"SELECT EXISTS(SELECT 1 FROM {self._name} WHERE {column}='{data}' LIMIT 1)")
                 return self.kursor.fetchone()[0]
 
-            except SqlError as error:
+            except SQLError as error:
                 echo.alert(error)
 
         def distinct(self, column, count=False):
@@ -496,12 +555,12 @@ class MashaDB:
                 result = self.kursor.fetchall()
                 return tuple(chain(*result))
 
-            except SqlError as error:
+            except SQLError as error:
                 echo.alert(error)
 
         def select(self, *columns: str):
             """create selection objects targeting single or multiple columns:
-               creates a Table.Selector object
+               calling select creates a Table.Selector object
 
                ARGUMENTS:
                     columns: str: a list of target columns names
@@ -543,23 +602,23 @@ class MashaDB:
             """
             return self.Selector(columns)
 
-        @BoundInnerClass
+        @ BoundInnerClass
         class Selector:
 
             def __init__(self, outer, columns):
                 self._name = outer._name
                 self._base = outer._base
-                self.columns = ', '.join(columns)
+                self.columns = ', '.join(columns) if columns else '*'
 
             def __repr__(self):
                 return f"{self._base}.{self._name}.{type(self).__name__}({self.columns})"
 
             def all(self, sort=None, limit=None):
-                """select all results from the selection
+                """select all results from the selection object
 
                    ARGUMENTS:
-                        sort:       str: sort the results
-                        limit:      str: limit results to a specifc number
+                        sort:  str: sort the results
+                        limit: str: limit results to a specifc number
 
                    USAGE:
                         selection = Table.select('people')
@@ -573,7 +632,7 @@ class MashaDB:
                     self.kursor.execute(query.strip())
                     return self.kursor.fetchall()
 
-                except SqlError as error:
+                except SQLError as error:
                     echo.alert(error)
 
             def expand(self, key, value):
@@ -593,11 +652,11 @@ class MashaDB:
                                          compound statements. defaults to AND
 
                                          examples:
-                                             where(name='AL', city='LA')
-                                             WHERE name = Al AND city = LA
+                                         where(name='AL', city='LA')
+                                         WHERE name = Al AND city = LA
 
-                                             where(op='or', name='AL', city='LA')
-                                             WHERE name = Al OR city = LA
+                                         where(op='or', name='AL', city='LA')
+                                         WHERE name = Al OR city = LA
 
                         sort:       str: sort the results
                         limit:      str: limit results to a specifc number
@@ -654,5 +713,5 @@ class MashaDB:
                     self.kursor.execute(query.strip())
                     return self.kursor.fetchall()
 
-                except SqlError as error:
+                except SQLError as error:
                     echo.alert(error)
