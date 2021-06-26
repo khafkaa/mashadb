@@ -225,7 +225,6 @@ class MashaDB:
             else:
                 statement.append(f"{key} {value}")
         try:
-            # print(f"CREATE TABLE IF NOT EXISTS {table}({', '.join(statement)})")
             self.kursor.execute(f"CREATE TABLE IF NOT EXISTS {table}({', '.join(statement)})")
             if self.verbose:
                 echo.info(f'Created Table {table}')
